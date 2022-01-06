@@ -1,0 +1,152 @@
+---
+title: "Analisi dell'efficienza dei comuni italiani a seguito della legge 81/1993"
+author: "Roberto Senatore"
+date: "31 gennaio 2020"
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+fig_width: 5 
+fig_height: 3
+documentclass: extarticle
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE, results='hide'}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(error = TRUE)
+```
+
+## Introduzione: Analisi del doppio turno negli anni 1999 e 2003
+In questa analisi, si è voluto analizzare gli effetti della **Legge 81/1993** su una parte dei comuni italiani, essa portò un drastico cambiamento per il sistema elettorale italiano, proposta dall'attuale Presidente della Repubblica, Sergio Mattarella, dapprima per regolamentare l'elezione delle Camere di rappresentanza nazionale e dopo esteso e revisionato anche per i comuni e le province.
+
+Precedentemente alla legge, i sindaci italiani erano eletti attraverso un **sistema proporzionale**, in cui i seggi venivano attribuiti in base alle preferenze delle liste elettorali e solo successivamente, attraverso il voto del Consiglio comunale, si procedeva all'elezione del sindaco, che a sua volta nominava la sua Giunta.
+
+I cambiamenti della legge portò ad un **sistema di tipo maggioritario**, suddiviso in base alla grandezza del comune.
+I comuni, con meno di 15000 abitanti, adottarono un sistema a turno singolo, in cui il candidato sindaco che avrebbe ottenuto la maggioranza veniva eletto, con un premio di maggioranza per la coalizione vincente.  
+
+In modo simile, i comuni con più di 15000 abitanti adottarono un sistema maggioritario a turno doppio; il candidato sindaco che non otteneva la maggioranza assoluta dei votanti alla prima votazione, si confrontava con il secondo in un secondo turno, la cui vittoria sarebbe spettata al candidato con maggioranza relativa.
+  
+  
+  
+Questo nuovo sistema portò all'**elezione diretta** del sindaco da parte dei cittadini.  
+In un periodo di forte instabilità politica e governativa, questa legge ebbe un forte impatto nelle amministrazioni locali.
+In questa disamina si è voluto analizzare l'**efficienza tecnica** di alcuni comuni, e se la legge ha prodotto variazioni, positive o negative, attraverso la valutazione di numerose variabili legate all'efficienza di un comune, e in particolare si osserveranno i cambiamenti legati al doppio turno (o runoff).
+  
+  
+
+## Presentazione dei dati
+
+### Dataset
+
+Il dataset in esame è composto da 6888 osservazioni che riguardano **2296 comuni** del Centro-Nord Italia, divisi negli anni 1994, 1999 e 2003, il nostro studio si concentrerà nell' analisi delle osservazione relative agli anni 1999 e 2003, e utlizzando le osservazioni del 1994 come dati precedenti all'introduzione della legge, poichè le votazioni in quell'anno non sono state abbastanza, e gli effetti sull'efficienza in un periodo cosi breve non sono considerabili.
+Altra precisazione da fare è la divisione del nostro dataset, dei comuni per numero di abitanti, in particolare quelli superiori ai 15.000 abitanti, che hanno subito l'introduzione del doppio turno, e quelli inferiori. E' opportuno specificare che i comuni con meno di 5000 abitanti non hanno subito modifiche in quanto già votavano con un sistema maggioritario.  
+
+Il dataset è composto da più di 10 variabili, alcune per identificare i comuni, come il codice elettorale e il nome, altre identificano il numero della popolazione suddivise in fasce d'eta (under 15, 15-64, over 65), le altre si riferiscono a parametri per valutare l'efficienza di un comune, attraverso i servizi offerti:quintali di rifiuti, km di strade e studenti. Altre 4 di queste variabili sono utlizzate come variabili dummy per differenziare i comuni. Infine, la variabile degli Impegni di Spesa corrente è stata utilizzata come input per le nostre analisi.
+
+
+
+### Dati anomali
+
+Prima di poter effettuare un'analisi esplorativa dei dati è opportuno pulire i dati da possibili dati mancanti ed eventuali **dati anomali**.I primi non sono presenti mentre, per i secondi, analizzando,ad esempio, la variabile di quintali di rifiuti è possibile vedere dati estremamente poco probabili per alcuni comuni, ragion per cui verranno esclusi, per non alterare i risultati delle nostre analisi.  
+
+La funzione boxplot del nostro software ci permette di identificare gli **outliers**, utilizzando la tecnica dei Tukey's fences, usando parametri standard e facendo attenzione, data l'**asimmetria** dei dati, di non escludere dei falsi positivi.  
+Sono stati trovati 176 comuni (per ogni anno, in totale 528) con valori fuori dal normale. 
+
+```{r echo=FALSE, fig.cap="Esempio distribuzione asimmetrica", fig.height=2.5, fig.width=4, warning=FALSE}
+library(haven)
+runoffdata <- read_dta("C:/Users/Roberto/Desktop/Statistica per i Big Data/8_Valutazione/Progetto/myx runoff19992003 (1).dta")
+runoffdata$rifXabit <- c(runoffdata$qlirifiuti/(runoffdata$pop15_64 + runoffdata$popunder14 + runoffdata$popover65))
+outliers <- boxplot(runoffdata$rifXabit, plot = FALSE)$out
+dataCLEAN <- runoffdata[-which(runoffdata$rifXabit %in% outliers),]
+hist(dataCLEAN$qlirifiuti, breaks = "FD",  main = "Distribuzione dei quintali di rifiuti", xlab = "Quintals")
+
+```
+\
+```{r eval=FALSE, include=FALSE}
+library(haven)
+runoffdata <- read_dta("C:/Users/Roberto/Desktop/Statistica per i Big Data/8_Valutazione/Progetto/myx runoff19992003 (1).dta")
+```
+
+```{r eval=FALSE, fig.height=2.5, fig.width=4, include=FALSE}
+boxplot(runoffdata$qlirifiuti/(runoffdata$pop15_64 + runoffdata$popunder14 + runoffdata$popover65),horizontal = TRUE, main = "Boxplot quintali rifiuti per abitante",cex = 0.65, range=2, cex.main=0.75)
+```
+
+```{r eval=FALSE, include=FALSE}
+runoffdata$rifXabit <- c(runoffdata$qlirifiuti/(runoffdata$pop15_64 + runoffdata$popunder14 + runoffdata$popover65))
+outliers <- boxplot(runoffdata$rifXabit, plot = FALSE)$out
+print(length(outliers))
+dataCLEAN <- runoffdata[-which(runoffdata$rifXabit %in% outliers),]
+boxplot(dataCLEAN$rifXabit)
+```
+
+\newpage
+### Statistiche descrittive
+
+Dopo aver proceduto alla pulizia del dataset, sono state esaminate le principali statistiche descrittive per le variabili dei comuni.  
+Sono riportate nella tabella in allegato, il minimo, il massimo, valore medio,mediana, terzo quartile e deviazione standard.
+Oltre a queste, durante le analisi specificate nei successivi paragrafi, le distribuzioni sono state raggruppate per fascia di popolazione (minore/maggiore di 15000).
+
+```{r eval=FALSE, include=FALSE}
+dataCLEAN$poptot <- c(dataCLEAN$popunder14 + dataCLEAN$pop15_64 + dataCLEAN$popover65)
+library(tidyverse)
+varDes <- dataCLEAN %>% 
+  filter(anno=="1994") %>%
+  filter(poptot >15000) %>%
+  summarise_each(funs(mean))
+varDes
+```
+
+
+
+## Tecniche utilizzate
+
+Per calcolare l'efficienza dei comuni ed eventuali miglioramenti o peggioramenti tra gli anni sotto esame abbiamo utilizzato diverse tecniche: l'**analisi di regressione su dati sezionali** (cross-section), che ci permette di misurare un'eventuale relazione lineare tra una variabile dipendente e una o più variabili indipendenti, con l'aggiunta di un termine d'errore che rappresenta una variabile aleatoria, non controllabile.  
+La funzione di regressione ci permette di analizzare i residui attraverso la tecnica dei minimi quadrati (OLS, ordinary least squares), e darci una misura dell'inefficienza, che dal punto di vista dell'output può variare da 1 a infinito, mentre dal punto di vista dell'input può essere compresa tra 0 e 1.
+
+L'SFA, ovvero, la **stochastic frontier analysis** è una tecnica parametrica la cui caratteristica è quella di dividere il termine d'errore in due parti: una relativa ad effetti casuali ed un'altra relativa all'inefficienza. Nella nostra analisi utilizzeremo il modello di Battese e Coelli(1992) che permette di adattare le misure anche a dati-panel, la trasformazione utilizzata è quella di tipo Cobb-Douglas: 
+$$Y_i = \beta * x_i + V_i - U_i$$
+A questa, grazie alla natura dei nostri dati, è possibile analizzare anche se sono presenti alcuni trend temporali, grazie all'aiuto di variabili dummy.
+
+L'ultima tecnica è quella del **Diff-in-Diff** (difference in differences), utilizzata per misurare l'effetto di un determinato 'trattamento' su un gruppo di soggetti trattati, nel nostro caso i comuni, e un altro gruppo di soggetti non trattati, detto 'di controllo'. Il modello utilizzato sarà:
+$$y = \beta_0 + \beta_1*dB + \delta_0*d2*dB + u_i$$
+dove d2 e dB sono variabili dummy in base se il soggetto è trattato o meno, e valgono 0 o 1.
+
+
+## Risultati delle analisi
+
+### Regressione sui dati sezionali
+
+A questo punto, si è proceduto nel sottoporre i nostri data puliti alla prima delle analisi di tipo parametrico, la **regressione sui dati sezionali**. I gruppi analizzati sono stati quello con tutte le 6360 osservazioni (senza i dati anomali) e  quello diviso per numero di abitanti. Utilizzando il modello Cobb-Douglas, si è potuto notare la significatività di tutte le variabili, confermando le nostre ipotesi riguardo il loro impatto sul modello; abbiamo calcolato i residui e i residui corretti, ed infine l'efficienza tecnica dal lato dell'output che si è attestato con una media di 42.34 , e dal lato dell'input con un valore circa di 0.036. I risultati ottenuti sono molto bassi e fuorvianti, ragion per cui verranno considerati **non attendibili**. E' ragionevole supporre che non tutti i residui sono da considerarsi inefficienza, ma sono presenti elementi stocastici.  
+  
+### Analisi SFA
+
+L'**analisi sfa**, diversamente dalla regressione, ha portato notevoli miglioramenti nell'analisi dell'efficienza, anche grazie alla struttura panel che si è usata, dividendo le osservazioni con una variabile dummy temporale per ogni anno (1994,1999,2003), utilizzando la metodologia di **time varying efficiency** (Battese & Coelli, 1995). Le variabili, chiamate uno-due-tre sono state aggiunte nel modello tra le componenti z, ed in particolar modo per il livello della tecnologia hanno raggiunto livelli di significatività accettabili.
+
+Dal lato degli output è possibile notare un marcato aumento di efficienza, passando dal 61% del 1994 al 86% del 1999 ed infine, all'81.9% del 2003. Possiamo considerare questi data affidabili anche considerando il valore che la variabile *gamma* assume, ovvero 0.838, non essendo troppo vicina a 1, ci permette di assumere i valori **realistici**, in quanto ci assicura che la **componente stocastica** nel modello viene considerata. Dal lato degli input, i risultati ottenuti riguardo l'efficienza, considerata sull'intervallo temporale, sono stato poco utili e inaffidabili, visto il valore della variabile gamma molto **prossima alla zero**.
+### Diff-in-Diff
+
+L'ultima analisi è stata quella del **diff-in-diff** per cercare di mettere in evidenza eventuali variazione dell'efficenza successivi al cambiamento istituzionale del doppio turno. In particolar modo, si è utilizzato le variabili binarie (0 e 1) doppio, per le osservazioni con numero di abitanti maggiore di 15000, e dopo, per le osservazioni dopo l'introduzione del doppio turno, e did, data dal prodotto delle precedenti due.  
+Dal punto di vista dell'**output**, i cambiamenti sono notevoli per i due diversi gruppi, il gruppo di controllo registra un notevole aumento dell'efficienza superiore al 10%, diversamente dal gruppo di trattamento che registra un aumento solo del 2%, in definitiva, dal lato dell'output i margini sono risultati ampiamente negativi rispetto la politica attuata.  
+
+Diversamente accade dal lato dell'**input**, precisando che le variabili studenti, doppio e did (doppio*dopo) sono non significative, nonostante ciò, il gruppo di trattamento a seguito della politica ha un incremento dell'efficienza del 12%, parallelamente, il gruppo di controllo cresce ulteriormente ed ha comunque un efficienza maggiore al primo, probabilmente dovuto a fattori della tecnologia cresciuti nel tempo.  
+
+\newpage
+
+## Conclusioni
+
+L'analisi che è stata affrontata, si è focalizzata sull'efficienza tecnica dei comuni italiani a seguito dell'introduzione del nuovo sistema elettorale dei sindaci, in base alla differenziazione che la stessa legge poneva per i comuni sopra e al di sotto dei 15000 abitanti. Le nostre analisi hanno riguardato i cambiamenti tra il 1994, anno di riferimento pre-politica,e gli anni 1999 e 2003, post-politica.  Le analisi di regressione, sfa e diff-in-diff hanno messo in luce quanto segue.  
+
+E' stato possibile vedere come dal punto di vista dell'input, l'efficienza dei comuni con maggior numero di persone guadagni molti punti percentuali, riducendo la vistosa differenza con i comuni meno abitati, confermando la natura positiva della legge, ma posizionandosi comunque al di sotto di essi.
+Risultato opposto per l'output, dove la legge ha prodotto livelli di crescita dell'efficienza maggiori per il gruppo di controllo rispetto quello di trattamento, in cui la legge è stata nettamente **inefficace**.
+
+
+
+
+
+
+
+
+
+
+
