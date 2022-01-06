@@ -1,0 +1,640 @@
+---
+title: "Ames Housing Analysis"
+author: "Roberto Senatore"
+subtitle: "Metodi Statistici per i Big Data"
+output:
+  html_document: 
+    theme: spacelab
+    toc: true
+    highlight: textmate
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE,error=FALSE,message=FALSE)
+```
+
+## Introduzione
+
+Ames Housing è un **dataset** pubblico che raccoglie i dati sulle caratteristiche delle abitazioni vendute in **Ames,Iowa** dal 2006 al 2010. L'obiettivo di questa analisi è prevedere il prezzo di vendita delle abitazioni usando le variabili fornite, a tale scopo, verranno utilizzate le tecniche studiate durante il corso di studi.
+
+### I dati
+
+Il dataset è composto da **2930 osservazioni** in **81 variabili** e proviene dal pacchetto AmesHousing, in cui è già stata implementata la fase di data cleaning dei dati, portando a zero gli evenutali valori mancanti e fattorizzando le opportune variabili.
+Al suo interno sono contenute 81 variabili, che descrivono al meglio le caratteristiche delle abitazioni, di cui 23 nominali, 23 ordinali, 14 discrete, and 20 continue. Per aiutarci nella compresione delle features è stata utilizzata la documentazione fornita con la spiegazione di ogni variabile. Da notare che le osservazioni raccolte non sono omogenee, infatti nel 2010 sono molto meno rispetto gli altri anni.
+
+```{r}
+# Caricamento librerie utilizzate
+library(AmesHousing)
+library(ggplot2)
+library(tidyverse)
+library(corrplot)
+library(ggmap)
+library(gridExtra)
+library(plotly)
+library(caret)
+library(rsample)
+library(glmnet)
+```
+
+
+```{r}
+# Importazione dataset
+dat <- make_ames()
+dim(dat)
+table(dat$Year_Sold)
+```
+
+## EDA - Exploratory Data Analysis
+
+### Variabili continue
+Il primo passo è stato quello di leggere attentamente ogni variabile e ogni sua implicazione, osservando direttamente con **grafici** le variabili più importanti per la comprensione del problema.
+Si è partiti con le **variabili continue**. La variabile risposta `Sale_Price` è stata la prima, nel grafico sottostante si può notare la sua distribuzione asimmetrica. 
+Le altre variabili continue osservate sono `Lot_Area`, con una coda molto pesante, `Lot_Frontage`, dove tutti i valori pari a zero sono i valori mancanti che sono state mantenuti nel grafico sottoforma di informazione.
+
+```{r, out.width= "70%",fig.align='center'}
+sp_plot <- ggplot(dat, aes(Sale_Price)) +
+  geom_histogram(aes(y=..density..),fill="deepskyblue3", col="black") +
+  theme_bw() + geom_density() +
+  ggtitle(label = "Distribuzione Prezzo di vendita")
+sp_plot
+```
+
+```{r, out.width= "70%",fig.align='center'}
+la_plot <- ggplot(dat, aes(Lot_Area)) +
+  geom_histogram(aes(y=..density..),fill="deepskyblue3", col="black") +
+  geom_density() +
+  labs(title = "Lot Area density plot",x="Lot Area") +
+  theme_bw()
+la_plot
+```
+
+```{r, out.width= "70%",fig.align='center'}
+lf_plot <-ggplot(dat, aes(Lot_Frontage)) +
+  geom_histogram(aes(y=..density..),fill="deepskyblue3", col="black") +
+  labs(title = "Lot Frontage density plot",x="Lot Area") +
+  theme_bw()
+lf_plot
+```
+
+La **distribuzione fortemente asimmetrica** di queste variabili ci fa intuire che una **trasformazione logaritmica** potrebbe essere conveniente. Infatti le distribuzioni logaritmiche diventano:
+
+```{r, out.width= "70%",fig.align='center'}
+logsp_plot <- ggplot(dat, aes(log(Sale_Price))) +
+  geom_histogram(aes(y=..density..),fill="deepskyblue3", col="black") +
+  labs(title = "Log Sale Price distribuzione",x="Sale Price") +
+  theme_bw()
+logsp_plot
+```
+
+```{r}
+logla_plot <- ggplot(dat, aes(log(Lot_Area))) +
+  geom_histogram(aes(y=..density..),fill="deepskyblue3", col="black") +
+  labs(title = "Log Lot Area distribuzione",x="Lot Area") +
+  theme_bw()
+
+
+loglf_plot <- ggplot(dat, aes(log(Lot_Frontage))) +
+  geom_histogram(aes(y=..density..),fill="deepskyblue3", col="black") +
+  labs(title = "Log Lot Frontage distribuzione",x="Lot Frontage") +
+  theme_bw()
+
+grid.arrange(logla_plot,loglf_plot)
+```
+
+Le variabili sono state trasformate nella loro versione logaritmica.
+
+```{r}
+# Trasformazione logaritmica
+dat <- dat %>%
+  mutate(Sale_Price = log(Sale_Price), Lot_Area = log(Lot_Area), 
+         Lot_Frontage = log(Lot_Frontage))
+```
+
+### Variabili categoriali
+
+Si è continuata l'esplorazione generale dei nostri dati con l'analisi delle **variabili categoriali**. Il primo grafico mostra la percentuale di abitazioni appartenenti ad uno specifico tipo presenti nel dataset mentre il secondo i quartieri in cui le vendite sono più numerose.
+
+```{r}
+# Percentuale tipo immobile/area
+subc_plot <- ggplot(dat,aes(x=MS_SubClass)) +
+  geom_bar(aes(y=..count../sum(..count..)),fill="deepskyblue3", col="black") +
+  labs(title = "Percentuale della Tipologia di abitazioni", y="%", x="Tipologia")+ 
+  coord_flip() +
+  theme_bw()+
+  scale_y_continuous(labels = scales::percent)
+subc_plot
+```
+
+```{r}
+#  Percentuale Neighborhood
+ng_plot <- ggplot(dat,aes(x=Neighborhood)) +
+  geom_bar(aes(y=..count../sum(..count..)),fill="deepskyblue3", col="black") +
+  labs(title = "Percentuale dei Quartieri", y="%", x="Quartiere")+ 
+  coord_flip() +
+  theme_bw()+
+  scale_y_continuous(labels = scales::percent)
+ng_plot
+```
+
+I grafici di altre variabili categoriali come `Street`,il tipo di vialetto per raggiungere la casa,`Roof_Matl`,i materiali che compongono il tetto,`Utilities`, le utenze disponibili,`Bldg_Type`,il tipo di abitazione, `Overall_Qual`e`Overall_Cond`, qualità e condizione generale dell'abitazione. Tutti i grafici sono stati raccolte in una **griglia riassuntiva**. 
+Infine, `Foundation`, cioè il tipo di fondamenta.
+```{r}
+# Street
+str.plot <- ggplot(dat,aes(dat$Street,..count../sum(..count..))) + geom_bar(width = 0.3,fill="deepskyblue3",col="black") +
+  scale_x_discrete(labels=c("Ghiaia", "Pavimento"))+
+  labs(title = "Tipo di strada", x="Tipo",y="%")+
+  theme_bw()+
+  scale_y_continuous(labels = scales::percent)
+
+# Roof 
+roofmat.plot <- ggplot(dat,aes(dat$Roof_Matl,..count../sum(..count..))) + geom_bar(width = 0.3,fill="deepskyblue3",col="black")+
+  labs(title = "Materiali del tetto", x="Tipo",y="%")+
+  theme_bw()+
+  theme(axis.text.x = element_text(size=8,angle = 45,vjust=0.5))+
+  scale_y_continuous(labels = scales::percent)
+
+# Utilities
+ut.plot <- ggplot(dat,aes(dat$Utilities,..count../sum(..count..))) + geom_bar(width = 0.3,fill="deepskyblue3",col="black")+
+  labs(title = "Utenze disponibili", x="Tipo",y="%")+
+  theme_bw()+
+  scale_y_continuous(labels = scales::percent)
+# ====
+
+# Tipo edificio
+bldg.plot <- ggplot(dat,aes(dat$Bldg_Type,..count../sum(..count..))) + geom_bar(fill="deepskyblue3",col="black") +
+  labs(title = "Tipo di abitazione", x="Tipo",y="%")+
+  scale_x_discrete(labels=c("1Fam","2FamC","Dpx","THe","THi"))+
+  theme_bw()+
+  scale_y_continuous(labels = scales::percent)
+
+# Grado Qualità materiali casa
+qualmat.plot <- ggplot(dat,aes(dat$Overall_Qual,..count../sum(..count..)))+
+  geom_bar(fill="deepskyblue3",col="black") +
+  scale_x_discrete(labels=c(1:10)) +
+  labs(title = "Qualità dei materiali", x="Tipo",y="%")+
+  theme_bw()+
+  scale_y_continuous(labels = scales::percent)
+
+# Qualità condizioni casa
+qualcon.plot <- ggplot(dat,aes(dat$Overall_Cond,..count../sum(..count..)))+
+  geom_bar(fill="deepskyblue3",col="black") +
+  scale_x_discrete(labels=c(1:10)) +
+  labs(title = "Condizione dell'abitazione", x="Valore",y="%")+
+  theme_bw()+
+  scale_y_continuous(labels = scales::percent)
+
+
+grid.arrange(qualcon.plot,qualmat.plot,bldg.plot,str.plot,roofmat.plot,ut.plot)
+
+```
+
+```{r, out.width= "70%",fig.align='center'}
+# Tipo fondazioni 
+fond.plot <- ggplot(dat,aes(dat$Foundation,..count../sum(..count..)))+
+  geom_bar(fill="deepskyblue3",col="black") +
+  scale_x_discrete(labels=c("Matt&Piast","BlocchiCem","CalcestruzzoV","Lastra","Pietra","Legno")) +
+  labs(title = "Tipo di Fondamenta", x="Tipo",y="%")+
+  scale_y_continuous(labels = scales::percent)+
+  theme_bw()
+fond.plot
+
+```
+
+```{r, out.width= "70%",fig.align='center'}
+# Zona 
+zona.plot <- ggplot(dat,aes(x=MS_Zoning,..count../sum(..count..)))+
+  geom_bar(fill="deepskyblue3",col="black")+
+  labs(title = "Abitazioni per tipo", x="Tipologia",y="%")+
+  scale_x_discrete(labels=c("FloatVRsd","Rsd_HighD","Dpx","Rsd_LowD","Rsd_MedD","Agric","Comm","Ind"))+
+  theme_bw()+
+  scale_y_continuous(labels = scales::percent)
+zona.plot
+```
+
+### Analisi incrociate
+
+L'esplorazione dei dati è continuata analizzando altri grafici che potessero contenere al loro interno delle informazioni utili al proseguimento delle analisi.
+
+Per verificare la presenza di **outlier**, sono stati visualizzati dei box-plot di variabili in funzione del prezzo di vendita. 
+In sostanza, non si notano particolari outlier e c'è una generale distribuzione di valori in funzione alla normale conformazione dei dati presentati, soprattutto per quanto riguarda un tipo di abitazione e la zona di vendita.
+
+```{r}
+# Prezzo-Tipo abitazione
+box1_plot <- ggplot(dat,aes(x=Bldg_Type,y=Sale_Price)) + geom_boxplot()+
+  scale_x_discrete(labels=c("1Fam","2FamC","Dpx","THe","THi"))+
+  labs(title = "Boxplot Prezzo vendita/tipo abitazione", x="Tipo",y="Sale Price")+
+  theme_bw()
+
+box2_plot <- ggplot(dat,aes(x=MS_Zoning,y=Sale_Price)) + geom_boxplot()+
+  labs(title = "Boxplot Prezzo vendita/Zona", x="Zona",y="Sale Price")+
+  scale_x_discrete(labels=c("FloatVRsd","Rsd_HighD","Dpx","Rsd_LowD","Rsd_MedD","Agric","Comm","Ind"))+
+  theme_bw()
+
+grid.arrange(box1_plot,box2_plot)
+
+```
+
+```{r}
+# Anno costruzione
+Annocost.plot <- ggplot(dat,aes(dat$Year_Built,..count../sum(..count..))) + geom_bar(fill="deepskyblue2",col="white") +
+  labs(title = "Anno di costruzione", x="Anno",y="%") +
+  scale_x_continuous(breaks=seq(1872,2010,by=5)) +
+  scale_y_continuous(labels = scales::percent)+
+  theme_bw()+
+  theme(axis.text.x = element_text(size=7,angle = 45))
+
+Annocost.plot
+```
+
+```{r}
+# Prezzi medi per quartiere
+meanp <- dat %>%
+  group_by(Neighborhood) %>%
+  summarise(meanSP = mean(Sale_Price))
+
+prezzomed.plot <- ggplot(meanp,aes(x=reorder(Neighborhood,meanSP),y=exp(meanSP))) +geom_bar(fill="deepskyblue2",col="white",stat = "identity")+
+  theme(axis.text.x = element_text(size=8)) +
+  labs(title = "Prezzo medio per quartiere", x="Quartiere",y="Prezzo medio")+
+  coord_flip()+
+  theme_bw()
+prezzomed.plot
+```
+
+
+### Visualizzazione spaziale
+
+Gli ultimi grafici esplorativi sono state centrati nella **visualizzazione spaziale** delle osservazioni, grazie alle variabili `Latitude` e `Longitude` contenute nel dataset è stato possibile circoscrivere la città di Ames nell'Iowa utilizzando la libreria `ggmap`.
+
+
+```{r}
+# Bounding Box
+## bbox = c(lowerleft_lon, lowerleft_lat, upperright_lon, upperright_lat).
+rlat <- range(dat$Latitude)
+rlon <- range(dat$Longitude)
+
+bbox <- c(-93.70, 41.98, -93.59, 42.077)
+amesmap <- get_stamenmap(bbox = bbox,zoom = 13)
+
+# Mappa Ames,Iowa
+ggmap(amesmap)
+```
+
+```{r, out.width='100%'}
+# MAPPA Abitazioni e quartieri
+mappa_1 <- ggmap(amesmap) + geom_point(data= dat,aes(x = Longitude, y = Latitude,col=Neighborhood))+
+  labs(title = "Abitazioni e quartieri",x="Longitudine", y="Latitudine")+
+  scale_color_hue(labels = strtrim(levels(dat$Neighborhood),7))
+ggplotly(mappa_1)
+```
+
+```{r}
+mappa_2 <- ggmap(amesmap) + geom_point(data= dat,aes(x = Longitude, y = Latitude,col=Sale_Price),size=1)+
+  labs(title = "Prezzo di vendita",x="Longitudine", y="Latitudine") +
+  scale_color_distiller(palette = "YlGnBu")
+
+mappa_2
+```
+
+
+```{r}
+# MAPPA Abitazioni e Anno costruzione
+mappa_3 <- ggmap(amesmap) + geom_point(data= dat,aes(x = Longitude, y = Latitude,col=Year_Built))+
+  labs(title = "Anno di costruzione",x="Longitudine", y="Latitudine")
+mappa_3
+```
+
+```{r}
+# MAPPA Abitazioni e Anno costruzione
+dat$Year_diff <- dat$Year_Remod_Add - dat$Year_Built
+
+mappa_4 <- ggmap(amesmap) + geom_point(data= dat,aes(x = Longitude, y = Latitude,col=Year_diff))+
+  labs(title = "Ristrutturazioni",x="Longitudine", y="Latitudine")+
+  scale_color_distiller(palette = "Oranges")
+   
+mappa_4
+```
+
+## Modellizzazione
+
+### Scelta delle variabili
+L'EDA ci ha permesso di conoscere più approfonditamente il dataset, a questo punto procediamo con la fase di **modellizzazione**, iniziando con la scelta delle variabili opportune fra le 80, seguendo il principio di ottenere un modello parsimonioso e che al tempo stesso rispecchi la realtà il più possibile.
+
+Si è proceduto selezionando le variabili numeriche dal dataset e calcolando la **correlazione** tra queste, successivamente sono state selezionate solo le variabili con una correlazione in valore assoluto con `Sale_Price` maggiore a **0.30**. Il grafico sotto evidenza questa relazione e in contemporanea anche la correlazione tra le variabili.
+
+```{r}
+# Seleziono le variabili numeriche e calcolo la correlazione
+numv <- select_if(dat,is.numeric)
+r_numv <- cor(numv,use = "complete.obs")
+
+# Ordino la correlazione rispetto Sale Price
+which(colnames(r_numv)=="Sale_Price")
+r_ord <- as.matrix(sort(r_numv[,33]))
+
+# Variabili con correlazioni in valore assoluto > 0.30
+r_high <- names(which(apply(r_ord, 1, function(x) abs(x)>0.30)))
+r_numv <- r_numv[r_high,r_high]
+
+# Plot
+cplot <- corrplot.mixed(r_numv, tl.col="black", tl.pos = "lt", number.cex = .7)
+
+
+```
+
+#### Correlazione variabili numeriche
+
+Osservando il plot è possibile notare come ci sia una forte **dipendenza lineare** tra alcuni variabili, in particolare:
+
+* Correlazione maggiore/uguale a **0.8**:
+    + `Total_Bsmt_Sf` - `First_Flr_Sf`
+    + `Garage Area` - `Garage Cars`
+    + `Gr_Liv_Area` - `TotRms_AbgGrade`
+* Correlazione maggiore/uguale a **0.6**: 
+    + `Gr_Liv_Area` - `Full_bath`
+    + `Year_Built` - `Year_Remod`
+  
+Per evitare problemi di **collinearità**, tra queste variabili sono state escluse quelle con correlazione più bassa con la variabile risposta `Sale_Price`, ovvero `First_Flr_Sf` e `Garage Area`, indicanti l'area del primo piano e del garage dell'abitazione.
+Infine, la variabile `Year_Remod`è stata sostituita dalla variabile `Year_diff`, che indica il numero degli anni dall'ultima ristrutturazione.
+
+```{r}
+dat$Year_diff <- dat$Year_Remod_Add - dat$Year_Built
+```
+
+
+<br>
+
+#### Variabili scelte
+
+A questo punto, sono state selezionate le variabili numeriche da includere nel modello che andranno ad aggiungersi alle variabile categoriche ritenute **rilevanti** attraverso l'EDA.
+
+Variabili numeriche:
+
+* **Mas_Vnr_Are**: Area totale del parquet (se presente)
+* **Fireplaces**: il numero dei camini
+* **Gr_Liv_Area**: area abitabile della casa, considerata dal livello del terreno in poi
+* **Full_Bath**: numero dei bagni con doccia o/e vasca da bagno
+* **Year_Built**: anno di costruzione dell'immobile
+* **Year_diff**: numero degli anni dall'ultima ristrutturazione
+* **Total_Bsmt_SF**: area del seminterrato
+* **Garage_Cars**: grandezza del garage misurata nella capacità di macchine parcheggiabili
+* **Half_Bath**: numero dei bagni senza doccia/vasca da bagno
+* **Wood_Deck_SF**: area del terrazino in legno (sq ft)
+* **Open_Porch_SF**: area del portico all'ingresso
+
+Variabili categoriche:
+
+* **Neighborhood**: quartiere di appartenenza
+* **MS_Zoning**: tipo di zona in cui si trova l'abitazione
+* **MS_SubClass**: tipologia di abitazione
+* **Overall_Qual**: valutazione complessiva della qualità dell'abitazione
+* **Overall_Cond**: valutazione complessiva della condizione attuale dell'abitazione
+
+<br><br>
+
+
+### Implementazione
+
+A questo punto, la variabile risposta e le variabili indipendenti sono state inserite in un dataset a parte ed è stata implementata la tecnica di splitting **train-test set**, per riuscire a valutare adeguatamente le performance del modello utilizzato. Utilizzando la libreria rsample, il dataset è stato diviso in modo che il train set avesse il 70% dei dati e il test set il rimanente 30%. 
+
+```{r}
+# Variabili utilizzate
+vbl <- c("Sale_Price", "Mas_Vnr_Area", "Fireplaces", "Gr_Liv_Area","Full_Bath","Year_Built",
+         "Year_diff","Total_Bsmt_SF","Garage_Cars","Half_Bath","Wood_Deck_SF", "Open_Porch_SF",
+         "Neighborhood","MS_Zoning", "MS_SubClass" , "Overall_Qual",
+         "Overall_Cond")
+
+datmod <- dat[,vbl]
+```
+
+
+```{r}
+set.seed(212)
+# Dividiamo il dataset in train e test set
+ames_split <- initial_split(datmod, prop = .7)
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+
+# Dimensioni train e test set
+dim(ames_train)
+dim(ames_test)
+```
+
+```{r}
+# Variabili predittori, senza costante
+x <- model.matrix(Sale_Price~.,ames_train)[,-1]
+
+# Variabile risposta
+y <- ames_train$Sale_Price
+```
+
+#### Ridge regression
+
+La prima tecnica utilizzata è stata quella delle regressione **Ridge**, tra i motivi di questa scelta c'è la presenza di condizionalità tra le variabili, nonostante siano state levate quelle con correlazione più alta tra loro, e il numero elevato di predittori che porta ad un bassa accuratezza predittiva.  
+La regressione Ridge pone un vincolo nei parametri \beta al quadrato stimati che porta ad uno "**shrinkage**" (penalità di contrazione) dei parametri.
+La scelta del **lambda** è stata fatta utilizzando la **cross-validation** ed il modello è stato calcolato sia per il lambda pià piccolo sia per quello scelto utilizzando il metodo **"1se"**, 1-standard-error, dove nell'intervallo di confidenza di un errore standard viene preso quello più grande.
+
+<br>
+
+> I metodi implementati di ridge e lasso regression richiedono che i dati siano **standardizzati**, infatti nel metodo di stima il prodotto tra i predittori e le stime dei beta dipende non solo dal valore di lambda ma anche dalla scale dei predittori (Le funzioni utilizzate nelle analisi standardizzano automaticamente le variabili).
+
+```{r, out.width= "50%",fig.show="hold"}
+# =======
+# RIDGE
+# =======
+set.seed(212)
+ridge.mod <- glmnet(x,y,alpha = 0, nlambda = 100)
+plot(ridge.mod,xvar = "lambda",label=TRUE)
+
+# Lambda with cross-validation
+cv.ridge <- cv.glmnet(x, y, alpha = 0)
+plot(cv.ridge)
+
+# Lambda minimo e lambda scelto con metodo 1-standard-error
+# cv.ridge$lambda.min
+# cv.ridge$lambda.1se
+
+ridge.min <- glmnet(x, y, alpha = 0, lambda = cv.ridge$lambda.min)
+ridge.1se <- glmnet(x, y, alpha = 0, lambda = cv.ridge$lambda.1se)
+## Coefficienti -> coef(ridge.min)
+```
+
+Dopo aver applicato il modello al train test, vengono calcolate le predictions sul test set e con la libreria caret, l'RMSE e l'R2, che ci permettono di valutare il modello. Il risultato ottenuto è pari a **89.72%** con il lambda minimo e **88.99%** con il lambda one-standard-error.
+
+```{r}
+# Predictions
+x.test <- model.matrix(Sale_Price ~., ames_test)[,-1]
+
+predictions.ridge.min <- ridge.min %>%
+  predict(x.test) %>%
+  as.vector()
+
+predictions.ridge.1se <- ridge.1se %>%
+  predict(x.test) %>%
+  as.vector()
+
+df.rid.min <- data.frame(
+  RMSE = caret::RMSE(predictions.ridge.min, ames_test$Sale_Price),
+  Rsquare = caret::R2(predictions.ridge.min, ames_test$Sale_Price)
+)
+
+df.rid.1se <- data.frame(
+  RMSE = caret::RMSE(predictions.ridge.1se, ames_test$Sale_Price),
+  Rsquare = caret::R2(predictions.ridge.1se, ames_test$Sale_Price)
+)
+
+df.union.rdg <- rbind(df.rid.min,df.rid.1se)
+rownames(df.union.rdg) <- c("Ridge min","Ridge 1se")
+
+df.union.rdg
+```
+
+<br>
+
+#### Lasso regression
+
+Similmente alla ridge, anche la regressione **Lasso** è un tipo di regressione **penalizzata** il cui vincolo sui parametri \beta è in valore assoluto.
+La Lasso riesce a performare bene se tra i predittori utilizzati pochi sono rilevanti e gli altri hanno coefficienti molto bassi o pari a zero.
+La selezione delle variabili fatta in precedenza, escludendo quelle altamente correlate tra loro, elimina uno dei problemi della Lasso, che seleziona solo una tra le variabili correlate.
+
+```{r, out.width= "50%",fig.show="hold"}
+# =======
+# LASSO
+# =======
+
+lasso.mod <- glmnet(x, y, alpha = 1)
+plot(lasso.mod,xvar="lambda")
+
+# Lambda with cross-validation
+cv.lasso <- cv.glmnet(x, y, alpha = 1,nfolds = 10)
+plot(cv.lasso)
+
+# Lambda minimo e lambda scelto con metodo 1-standard-error
+# cv.lasso$lambda.min
+# cv.lasso$lambda.1se
+
+
+lasso.min <- glmnet(x, y, alpha = 1, lambda = cv.lasso$lambda.min)
+# coef(lasso.min)
+lasso.1se <- glmnet(x, y, alpha = 1, lambda = cv.lasso$lambda.1se)
+# Coefficienti -> coef(lasso.1se) coef(lasso.min)
+```
+Anche qui vengono calcolate le predictions e valutato il modello che arriva ad un **89.82%** e **89.07%**.
+
+Predictions per la Lasso regression:
+
+```{r}
+
+# Predictions
+x1.test <- model.matrix(Sale_Price ~., ames_test)[,-1]
+
+predictions.lasso.min <- lasso.min %>%
+  predict(x1.test) %>%
+  as.vector()
+
+predictions.lasso.1se <- lasso.1se %>%
+  predict(x1.test) %>%
+  as.vector()
+
+df.las.min <- data.frame(
+  RMSE = caret::RMSE(predictions.lasso.min, ames_test$Sale_Price),
+  Rsquare = caret::R2(predictions.lasso.min, ames_test$Sale_Price))
+
+df.las.1se <- data.frame(
+  RMSE = caret::RMSE(predictions.lasso.1se, ames_test$Sale_Price),
+  Rsquare = caret::R2(predictions.lasso.1se, ames_test$Sale_Price))
+
+df.union.las <- rbind(df.las.min,df.las.1se)
+rownames(df.union.las) <- c("Lasso min","Lasso 1se")
+
+df.union.las
+```
+
+<br>
+
+#### Elastic net
+
+L'ultima tecnica utilizzata è stata l'**Elastic Net**, una regressione con un parametro di "mixing" tra la regressione Ridge e quella Lasso, i cui vantaggi sono:
+
+* Rinforza la sparsity
+* Nessuna limitazione sul numero di variabili selezionate
+* Incoraggia l'effetto di raggrupamento in presenza di predittori correlati tra loro
+
+Purtroppo, poiché nella funzione dell'Elastic Net sono presenti due penalizzazioni (quadratica e valore assoluto) comporta un doppio "shrinkage" (restringimento).
+
+Sono state calcolate vari modelli di elastic net con diversi valori di lambda in modo da mixare la regressione ridge e quella lasso.
+
+```{r, out.width="50%",fig.show="hold"}
+
+# ===========
+# Elastic net
+# ===========
+
+cv.en.2 <- cv.glmnet(x,y,alpha=.2)
+cv.en.5 <- cv.glmnet(x,y,alpha=.5)
+cv.en.8 <- cv.glmnet(x,y,alpha=.8)
+
+plot(cv.en.2)
+plot(cv.en.5)
+plot(cv.en.8)
+
+mod.en.2 <- glmnet(x, y, alpha = 0.2, lambda = cv.en.2$lambda.min)
+mod.en.5 <- glmnet(x, y, alpha = 0.5, lambda = cv.en.5$lambda.min)
+mod.en.8 <- glmnet(x, y, alpha = 0.8, lambda = cv.en.8$lambda.min)
+```
+
+```{r}
+# Predictions
+x2.test <- model.matrix(Sale_Price ~., ames_test)[,-1]
+
+
+predictions.en.8 <- mod.en.8 %>%
+  predict(x2.test) %>%
+  as.vector()
+predictions.en.5 <- mod.en.5 %>%
+  predict(x2.test) %>%
+  as.vector()
+predictions.en.2 <- mod.en.2 %>%
+  predict(x2.test) %>%
+  as.vector()
+
+
+df.en.8 <- data.frame(
+  RMSE = caret::RMSE(predictions.en.8, ames_test$Sale_Price),
+  Rsquare = caret::R2(predictions.en.8, ames_test$Sale_Price))
+
+df.en.5 <- data.frame(
+  RMSE = caret::RMSE(predictions.en.5, ames_test$Sale_Price),
+  Rsquare = caret::R2(predictions.en.5, ames_test$Sale_Price))
+
+df.en.2 <- data.frame(
+  RMSE = caret::RMSE(predictions.en.2, ames_test$Sale_Price),
+  Rsquare = caret::R2(predictions.en.2, ames_test$Sale_Price))
+
+df.union.en <- rbind(df.en.8,df.en.5,df.en.2)
+rownames(df.union.en) <- c("En.8","En.5","En.2")
+df.union.en
+```
+
+### Risultati
+
+Tutti i risultati sono stati uniti in una tabella riassuntiva, le migliori performance ottenute (anche se di poco) si evidenziano utilizzando il metodo **Lasso**, sia per un lambda minimo che con quello scelto tramite 1se (in ottica di parsimonia il secondo lambda è preferibile) con un valore di **89.82%**.
+```{r}
+coef(cv.lasso, s = "lambda.min")
+
+df_result <- rbind(df.union.rdg,
+                df.union.las,
+                df.union.en)
+df_result
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
