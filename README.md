@@ -1,4 +1,4 @@
-# Link diretto ai report
+# Data science projects
 
 ### Report: [Beijing_PM2.5](https://htmlpreview.github.io/?https://github.com/robsnx/data-science-projects/blob/main/beijing_pm2.5/Beijing_report.html)
 La presenza di polveri sottili ha reso alcune città del continente asiatico tra le più inquinate del mondo, è stato analizzato un
