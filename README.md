@@ -1,5 +1,7 @@
 # Inquinamento dell'aria a Pechino da polveri sottili PM 2.5
 
+[Report.html](https://htmlpreview.github.io/?https://github.com/robsnx/beijing_pm2.5/blob/main/Beijing_report.html)
+
 L'inquinamento atmosferico è uno dei grandi problemi del 21° secolo, lo sviluppo urbano attorno alle grandi capitali del mondo ha reso l'aria di queste città sempre meno respirabile e dannosa per la salute dell'uomo.   
 La principale causa di inquinamento è imputabile alla presenza delle **polveri sottili**, nome per riferirsi all'insieme di particelle presenti nell'atmosfera indicate spesso con il nome di **particolato**, che possono contenere: solfato, nitrati, cloruro di sodio, carbonio nero, ect.  
 L'origine può essere associata ad attività naturali come incendi boschivi ed eruzioni vulcaniche e all'attività umana, in particolare industrie, riscaldamenti domestici e l'usura dei freni e dei pneumatici.  
