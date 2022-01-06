@@ -6,3 +6,7 @@ La presenza di polveri sottili ha reso alcune città del continente asiatico tra
 
 ### Report: [Housing_analysis](https://htmlpreview.github.io/?https://github.com/robsnx/data-science-projects/blob/main/housing_analysis/AmesRMK.html)
 Ames Housing è un **dataset** pubblico che raccoglie i dati sulle caratteristiche delle abitazioni vendute in **Ames,Iowa** dal 2006 al 2010. L'obiettivo di questa analisi è prevedere il prezzo di vendita delle abitazioni usando le variabili a disposizione. Il dataset è composto da **2930 osservazioni** in **81 variabili**.
+
+## Small projects
+### Report: [Airline_performance](https://github.com/robsnx/data-science-projects/blob/main/airline_performance/Airline_performance.pdf)
+Questo breve report si riferisce all’analisi del dataset sulle performance degli aerei di linea negli Stati Uniti d’America al fine di utilizzare strumenti per processare e computare problemi su una grande mole di dati, come PySpark, e visualizzare i risultati con strumenti grafici nell’ambiente R. I dati sono stati scaricati dall’ASA e consistono sui voli di aerei di linea americani tra l’ottobre 1987 e Aprile 2008. Essi consistono di **120 milioni di osservazioni** su 29 variabili.
