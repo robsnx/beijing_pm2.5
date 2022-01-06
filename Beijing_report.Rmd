@@ -1,0 +1,588 @@
+---
+title: "Inquinamento dell'aria a Pechino"
+author: "Roberto Senatore"
+date: "8 giugno 2021"
+output: 
+  html_document:
+    theme: spacelab
+    toc: true
+    highlight: textmate
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message = FALSE,warning = FALSE)
+```
+![_Beijing_](pechino_g.jpg){height="200" width=70%}
+
+## Introduzione
+L'inquinamento atmosferico è uno dei grandi problemi del 21° secolo, lo sviluppo urbano attorno alle grandi capitali del mondo ha reso l'aria di queste città sempre meno respirabile e dannosa per la salute dell'uomo.   
+La principale causa di inquinamento è imputabile alla presenza delle **polveri sottili**, nome per riferirsi all'insieme di particelle presenti nell'atmosfera indicate spesso con il nome di **particolato**, che possono contenere: solfato, nitrati, cloruro di sodio, carbonio nero, ect.  
+L'origine può essere associata ad attività naturali come incendi boschivi ed eruzioni vulcaniche e all'attività umana, in particolare industrie, riscaldamenti domestici e l'usura dei freni e dei pneumatici.  
+\
+L'Organizzazione mondiale della Sanità (OMS) l'ha classificato come 
+[cancerogeno](https://web.archive.org/web/20160529064001/http://ehp.niehs.nih.gov/1408092/), e in base alla sua dimensione, che può essere minore di 10 micron (**PM10**) o di 2.5 micron (**PM2.5**), può penetrare nei bronchi e perfino negli alveoli polmonari provocando l'insorgenza di malattie polmonari e cardiovascolari.  
+\
+I valori annuali limite di esposizione secondo l'OMS sono di 25 µg/m³ per il PM2.5 e 40 µg/m³ per il PM10. A Pechino il 23 gennaio del 2012 il valore massimo registrato è stato di 994 µg/m³. 
+
+
+## Dati
+La presenza del particolato ha reso alcune città del continente asiatico tra le più inquinate del mondo, ragion per cui è stato analizzato un
+[dataset](https://archive.ics.uci.edu/ml/datasets/PM2.5+Data+of+Five+Chinese+Cities) relativo al monitoraggio del particolato PM2.5 in cinque grandi città cinesi: Beijing, Shanghai, Chengdu, Guangzhou e Shenyang ottenuto dal database dell'**UCI Machine Learning Repository**, in particolare ci siamo concentrati sulle rilevazioni a **Pechino** (Beijing), che ci ha permesso di applicare le principali tecniche di *forecasting* per serie storiche sui livelli di inquinamento.
+
+### Struttura dei dati
+Il dataset è composto dall'**osservazioni orarie** effettuate da quattro diversi siti di monitoraggio a Pechino: Dongsi, Dongsihuan, Nongzhanguan e US Post (ambasciata americana) relative all'arco temporale tra il 1 gennario 2010 e il 31 dicembre 2015, per un totale di **52584** unità statistiche e **18** variabili.
+
+**Descrizione delle variabili**
+
+* **No**: valore indicizzato dell'unità statistica
+* **Year, month, day**: anno, mese e giorno del rilevamento
+* **hour**: ora in formato 24 ore del rilevamento
+* **season**: stagione del rilevamento
+* **PM_Dongsi**: stazione di monitoraggio al centro di Pechino
+* **PM_Dongsihuan**: stazione di monitoraggio a nord-est di Pechino
+* **PM_Nongzhanguan**: stazione di monitoraggio a nord-est di Pechino
+* **PM_US.Post**: stazione di monitoraggio dell'ambasciata americana a Pechino
+* **DEWP**: dew point, o punto di rugiada, stato termodinamico in cui si ha la presenza contemporanea di liquido-vapore e oltre il quale solo di vapore
+* **PRES**: pressione atmosferica
+* **TEMP**: temperatura ambientale in gradi Celsius
+* **cbwd**: direzione del vento
+* **Iws**: velocità del vento (m/s)
+* **precipitation**: precipitazioni orarie (mm)
+* **Iprec**: precipitazioni cumulate (mm)
+
+```{r,warning = FALSE,message = FALSE}
+# Librerie
+library(tidyverse) # reshaping dataset
+library(fpp2) # forecast package
+library(lubridate) # Per riformattare le date
+library(imputeTS) # Time series
+library(zoo) # na.aggregate
+library(psych) # describe
+library(corrplot)  # correlation
+library(car)  # outliers
+```
+
+
+### Analisi esplorativa
+Prima di iniziare con la formulazione di modelli previsivi, è importante fare un'analisi esplorativa del nostro dataset, facendo un'opportuna pulizia di **valori anomali** e **valori mancanti**.
+```{r, attr.output='style="max-height: 100px;"'}
+data <- read.csv('C:/Users/Roberto/Desktop/Statistica BD/Dataset/BeijingPM2010_2015.csv',header = TRUE)
+summary(data)
+```
+
+### Valori mancanti
+Dato l'alto numero di valori mancanti nella variabile d'interesse PM_US.Post che riporta i valori del particolato, è stata modificata la struttura del dataset, sono state unite le osservazioni delle altre stazioni di monitoraggio di Nongzhanguan, Dongsi e Dongsihuan, e le variabili temporali sono state raggrupate in **date**.
+
+```{r}
+# Dataset reshape
+# Join tra colonne dei siti di monitoraggio
+data$PM_US.Post <- ifelse(is.na(data$PM_US.Post),data$PM_Nongzhanguan,data$PM_US.Post)
+data$PM_US.Post <- ifelse(is.na(data$PM_US.Post),data$PM_Dongsi,data$PM_US.Post)
+data$PM_US.Post <- ifelse(is.na(data$PM_US.Post),data$PM_Dongsihuan,data$PM_US.Post)
+
+mydata <- data %>%
+  mutate(date = make_datetime(year,month,day)) %>%
+  select(-c('No','year','month','day','PM_Dongsi','PM_Dongsihuan','PM_Nongzhanguan','cbwd'))
+head(mydata)
+```
+
+Nonostante la join sono rimasti altri NA da come è possibile vedere nel grafico della distribuzione, inoltre anche altre variabili presentano valori mancanti ma in misura decisamente minore. Ragion per cui i dati sono stati raggruppati per **giorno**, anche per evitare problemi di multi-stagionalità nelle analisi successive.
+```{r, out.width= "70%",fig.align='center'}
+# NA distribution PM25
+ggplot_na_distribution(data$PM_US.Post)
+
+# Raggruppo per giorni
+mydata <- mydata %>%
+  group_by(date) %>%
+  summarise(PM25 =mean(PM_US.Post,na.rm = TRUE), dew_point=mean(DEWP,na.rm = TRUE), 
+            humidity=mean(HUMI,na.rm = TRUE),pressure=mean(PRES,na.rm = TRUE),
+            temperature=mean(TEMP,na.rm = TRUE),cum_windspeed=mean(Iws,na.rm = TRUE),
+            precipitation=mean(precipitation,na.rm = TRUE),cum_precip=mean(Iprec,na.rm = TRUE)) 
+head(mydata)
+```
+
+### Outliers
+La ricerca di possibili outliers è stata fatta utilizzando i **Tukey fences** della funzione boxplot, la maggioranza delle variabili non ha presentato valori anomali, mentre **PM25** e **cum_windspeed** hanno valori che rappresentano la normale struttura dei dati e quindi non devono essere eliminati, solamente le variabili **precipitation** e **cum_precip**, che è una trasformazione della prima, hanno un valore anomalo che è stato eliminato.
+```{r}
+# Outliers
+par(mfrow=c(3,2))
+# Normale struttura dati
+boxplot(mydata[,'PM25'],horizontal = T,main="Boxplot PM 2.5")
+boxplot(mydata[,'cum_windspeed'],horizontal = T,main="Boxplot Cumulative Windspeed")
+# Nessun outlier
+boxplot(mydata[,'dew_point'],horizontal = T,main="Boxplot Dew Point")
+boxplot(mydata[,'humidity'],horizontal = T,main="Boxplot Humidity")
+boxplot(mydata[,'pressure'],horizontal = T,main="Boxplot Pressure")
+boxplot(mydata[,'temperature'],horizontal = T,main="Boxplot Temperature")
+
+```
+
+```{r, out.width= "40%",fig.align='center'}
+boxplot(mydata[,'precipitation'],horizontal = T,main="Boxplot Precipitation")
+max(mydata[,'precipitation'],na.rm = TRUE)
+mydata[2137,"precipitation"] <- 0
+mydata[2137,"cum_precip"] <- 0
+```
+### Classificazione PM 2.5
+
+Utilizzando la **classificazione americana** sui limiti del particolato si è mostrato le categorie di riferimento presenti nel nostro dataset.
+\
+Solo il **2.37%** è risultato con un livello accettabile, e meno del **20%** con un livello moderato, il **13.7%** è risultato non salutare per molte categorie sensibili. Invece, il **62.86%** presenta valori decisamente non salutari. 
+
+```{r}
+categ <- cut(round(mydata$PM25,1),breaks = c(-Inf,12.0,35.4,55.4,150.4,250.4,+Inf),
+                    labels = c("Good","Moderate","Unhealthy(*groups)","Unhealthy","Very unhealthy","Hazardous"))
+round(table(categ)/length(mydata$PM25)*100,2)
+
+categ <- as.data.frame(categ)
+colr <- c("green","yellow","orangered1","red","red4","grey11","grey")
+ggplot(categ)+geom_bar(aes(x=categ),fill=colr,col="black")+theme_bw() + ggtitle("Classificazione valori PM2.5 dataset")+
+  ylab("Numero")+xlab("")
+
+```
+
+
+### Correlazione
+Data la natura dei nostri dati è d'aiuto osservare le correlazioni tra le variabili del dataset.
+```{r}
+corr <- cor(mydata[,2:8],use="complete.obs")
+corrplot.mixed(corr,tl.col="black", tl.pos = "lt", number.cex = .7)
+GGally::ggpairs(mydata[,2:8])
+
+```
+
+## Time series 
+Il dataset è stato trasformato in un oggetto di tipo **time series** e i pochi valori mancanti rimanenti tra i dati sono stati rimpiazzati utilizzando una funzione di imputazione, la **Mean Value Imputation**, che consiste nel sostituire i valori mancanti con la media della colonna corrispondente, tuttavia a causa della presenza di stagionalitànei dati è stata utilizzata la funzione **na_seadec** del pacchetto imputeTS che permette di rimuovere la stagionalità prima di utilizzare l'imputazione e successivamente re-inserirla.
+
+```{r}
+tsdata <- ts(mydata,start = 2010,frequency = 365.25)
+sommaNA <- rep(1,8)
+for (i in 2:9)
+{
+  sommaNA[i] <- sum(is.na(tsdata[,i]))
+}
+names(sommaNA) <- colnames(tsdata)
+sommaNA
+# Ci sono ancora 36 NA in PM25
+statsNA(tsdata[,"PM25"])
+
+# Imputazione con la Media
+tsdata1 <- na_seadec(tsdata)
+ggplot_na_imputations(tsdata[,"PM25"],tsdata1[,"PM25"])
+```
+
+### Componenti della serie
+Durante l'analisi di serie storiche è di primaria importantanza analizzare le componenti della serie che possono essere:
+
+ * **trend**: cambiamento positivo o negativo, in un periodo prolungato nel livello medio della serie.
+ * **stagionalità**: cambiamenti periodici in un intervallo di tempo regolare.
+ * **ciclicità**: cambiamenti non periodici nella serie.
+Il resto delle variazioni è attribuibile ad effetti **irregolari**. 
+
+La nostra serie storica dal grafico riportato non ha sicuramente un trend, mentre è possibile notare dei picchi **regolari** all'inizio/fine di ogni anno, con una magnitudo dell'effetto variabile, questo potrebbe riferirsi alla presenza di **stagionalità** a causa di effetti temporali, come la stagione invernale.
+
+```{r}
+autoplot(tsdata1[,"PM25"],xlab= "Years",ylab="Pm 2.5",main="Beijing PM 2.5 Time series")+theme_bw()
+```
+
+In particolare, prendendo un sotto-insieme per gli anni 2014 e 2015:
+
+```{r, out.width= "70%"}
+# 2 anni
+a1 <- window(tsdata1[,"PM25"],start=2014)
+ggseasonplot(a1,main="Seasonal plot 204-2015") 
+```
+
+
+### Stazionarietà e Auto-correlazione
+Il grafico della serie ci permette di fare considerazioni anche riguardo la **stazionarietà**, essa è definita come una caratteristica delle serie in cui le loro proprietà statistiche non cambiano nel tempo e indipendentemente da quando viene osservata.
+Nel nostro caso, la componente stagionale fa si che la stazionarietà **non sia rispettata**.
+Uno dei mezzi per osservarla meglio è utilizzando l'**auto-correlazione campionaria**, intesa come il legame lineare tra i valori ritardati di una stessa serie. 
+Nello specifico, utilizzando il **correlogramma ACF** è possibile vedere queste auto correlazioni.
+
+```{r, out.width= "70%",fig.align='center'}
+ggAcf(tsdata1[,"PM25"])+ ggtitle("ACF plot")+ theme_bw()
+```
+
+**Segnali di non stazionarietà:**
+
+* L'autocorrelazione al ritardo(1) è molto elevato e positivo.
+* Durante tutti gli altri ritardi le autocorrelazioni scendono gradualemente a zero.
+
+
+## Modelli standard 
+Uno dei maggiori obiettivi quando si analizzano delle serie storiche è quello di **fare previsioni**, in questo paragrafo applicheremo prima di tutto i principali metodi di previsione che vengono utilizzati come **benchmark**, tra cui:
+
+* **Average Method**: la previsione dei dati si basa sulla media dei valori della serie storica.
+
+```{r, out.width= "70%"}
+# Average method
+a2 <- window(tsdata1[,"PM25"], start=2015)
+
+mf <- meanf(tsdata1[,"PM25"])
+autoplot(a2) + autolayer(mf, series="Average", PI=FALSE)+theme_bw() + ggtitle("Average method")+
+  ylab("Pm 2.5")
+
+```
+
+
+* **Naive method**: la previsione dei dati si basa sull'ultima osservazione osservata.
+
+```{r, out.width= "70%"}
+# Naive method
+nv <- naive(tsdata1[,"PM25"])
+autoplot(a2) + autolayer(nv, series="Naive", PI=FALSE)+theme_bw() + ggtitle("Naive method")+
+  ylab("Pm 2.5")
+```
+
+* **Drift Method**: simile al metodo Naive ma le previsioni possono crescere o decrescere, e sono ottenute come variazioni medie dei valori osservati. 
+```{r, out.width= "70%"}
+# Drift method
+drift <- rwf(tsdata1[,"PM25"],60,drift = TRUE)
+autoplot(a2) + autolayer(drift, series="Drift", PI=FALSE)+theme_bw() + ggtitle("Drift method")+
+  ylab("Pm 2.5")
+
+```
+
+* **Seasonal Naive method**: metodo Naive applicato a dati stagionali, in cui le previsioni si riferiscono al periodo "stagionale" precedente. Le previsioni generate sono state ottenute per un periodo futuro di 30 giorni.
+```{r, out.width= "70%"}
+# Applicazione manuale del seasonal naive
+T=length(tsdata1[,"PM25"])
+h=1:60
+m=frequency(tsdata1[,"PM25"])
+k=floor((h-1)/m)
+# snv <- tsdata1[,"PM25"][T+h-(m*(k+1))]
+
+# Funzione Seasonal Naive method
+snv <- snaive(tsdata1[,"PM25"],30)
+autoplot(a2) + autolayer(snv, series="Seasonal Naive", PI=FALSE)+theme_bw() + ggtitle("Seasonal Naive method")+ylab("Pm 2.5")
+```
+
+**Confronto tra i metodi**
+
+```{r, out.width= "70%"}
+autoplot(a2) + 
+  autolayer(mf, PI=FALSE,series="Mean") + 
+  autolayer(nv, PI=FALSE, series="Naive") +
+  autolayer(snv, PI=FALSE, series="SNaive") +
+  autolayer(drift, series="Drift", PI=FALSE) +
+  guides(colour=guide_legend(title="Forecast")) +
+  ggtitle("Forecasts for monthly level of PM 2.5")+
+  theme_bw()
+```
+
+N.B: Per la nostra serie, la variazione tra i metodi Naive e Drift è poco visibile sul grafico.
+
+## Trasformazioni
+### Box-Cox
+Le trasformazioni matematiche sono particolarmente utili quando si utilizzano serie storiche con diversi livelli e in particolare per quelle **non stazionarie**, come nel nostro caso.
+L'esempio più noto è la **trasformazione di Box-Cox** appartente alla famiglia di trasformazioni di potenza, che può essere ricondotta anche ad una trasformazione **logaritmica** utilizzando in modo opportuno il parametro **lambda**.  
+Lo scopo di questa trasformazione è di rendere la distribuzione della serie più simile a quella della normale, riducendo l'asimmetria.
+
+```{r, out.width= "70%"}
+# Trasformazione di Box-Cox
+lambda <- BoxCox.lambda(tsdata1[,"PM25"])
+autoplot(BoxCox(tsdata1[,"PM25"],lambda),main="Box-Cox Transformation, lambda=0.69", ylab="PM 2.5")+
+  theme_bw() 
+autoplot(BoxCox(tsdata1[,"PM25"],lambda),main="Box-Cox Transformation, lambda=0.69", ylab="PM 2.5",series="TS with BoxCox")+
+autolayer(tsdata1[,"PM25"],series = "TS without BoxCox") + theme_bw() + guides(colour=guide_legend(title = "Serie"))
+# Dati trasformati
+lambda <- BoxCox.lambda(tsdata1[,"PM25"])
+tData <- BoxCox(tsdata1[,"PM25"],lambda)
+tData1 <- BoxCox(tsdata1,lambda)
+```
+
+### Back-transformation e Bias Adjustment
+Utilizzare delle trasformazioni su una serie fa si che i modelli vengono stimati su i dati transformati e quindi è necessario che le previsioni e gli intervalli debbano essere riconvertiti sulla scala dei **dati originali**, per questo motivo è importante utilizzare la **back transformation**.  
+Nel caso della Box-Cox essa viene fatto semplicemente con la sua **funzione inversa** ma le previsioni puntuali si basano sulla **mediana** della distribuzione di previsioni e non più sulla **media**.
+Questo è importante in caso si vogliano utilizzare previsioni **aggregate**, ad esempio su base mensile. Questa correzione è chiamata **bias adjustment**.
+
+```{r, out.width= "70%"}
+# Bias adjustment
+drift1 <- rwf(tsdata1[,"PM25"],30,lambda="auto",drift = TRUE)
+drift2 <- rwf(tsdata1[,"PM25"],30,lambda="auto",drift= TRUE, biasadj = TRUE)
+autoplot(a2,main="Drift method with Back transformation and Bias Adjustment") + 
+  autolayer(drift1, series="Back-transformation", PI=FALSE)+
+  autolayer(drift2,PI=FALSE,series="Bias Adj")+
+  guides(colour=guide_legend(title="Forecast")) + theme_bw()
+
+```
+
+## Analisi dei residui
+L'analisi dei residui ci permette di verificare se il nostro modello ha catturato la maggior parte delle informazioni dei dati. Esso è costruito come la differenza tra i dati osservati e i valori stimati dal modello.  
+Le proprietà desiderabili per i residui di un buon modello sono:
+
+* **Residui incorrellati**: se i residui sono correllati ci sono informazioni che sono state tralasciate.
+* **Residui con media zero**: diversamente le previsioni saranno distorte.
+* **Residui con varianza costante**: per avere dei migliori intervalli di previsione.
+* **Residui con distribuzione normale**
+
+Le diagnostiche che si utilizzano sono il correlogramma ACF per vedere la correlazione tra i residui e il **test di Ljung-Box**, per testare formalmente che la correlazione sia zero.
+
+```{r, out.width= "70%"}
+#
+fitt <- fitted(snaive(tsdata1[,"PM25"],h = 10,lambda = "auto"))
+autoplot(tsdata1[,"PM25"],ylab="Values",series = "Observed Values",main = "Fitted and Observed Values (Seasonal Naive)") + 
+  autolayer(fitt,series = "Fitted Values")+
+  theme_bw() +  scale_colour_manual(values = c("steelblue2", "black")) + guides(colour=guide_legend(title="Values Type"))
+  
+checkresiduals(snaive(tsdata1[,"PM25"],h = 10,lambda = "auto"))
+```
+
+Si può vedere nel grafico riassuntivo che la varianza dei residui è abbastanza costante intorno lo zero e la loro distribuzione è molto simile ad una normale; nell'ACF, invece, è evidente che la correlazione non è zero soprattutto per i valori di 1 e 365 giorni, la conferma è possibile averla anche nel test di Ljung-Box che rifiuta l'ipotesi nulla con un **p-value** molto basso.
+
+**NB:** E' importante ricordare che nell'analisi di serie storiche è facile trovare autocorrelazione nei residui, in questo caso le previsioni saranno inefficienti ma sono non-distorte e non sono "sbagliate" ma si avranno intervalli di previsione più grandi del normale.
+
+## Accuratezza delle previsioni
+Per valutare correttamente delle previsioni ci sono diversi metodi, la maggior parte fa affidamento sugli **errori di previsione**, definiti come: $$e_{T+h}=y_{T+h} + \hat{y}_{T+h|T}$$.
+Ottenuti dalla divisione dei dati in **training set** e **test set**, e calcolati su quest'ultimo.  
+I primi due indici più utilizzati per la valutazione sono misure **scale-dependent**, cioè che si basano sulla scala dei dati:
+
+- **Mean Absolute Error**: $$MAE = mean(|e_{T+h}|)$$
+- **Root Mean Squared Error**: $$RMSE = \sqrt{mean(e_{T+h}^2)}$$
+Essi misurano la variabilità degli errori, il primo utilizzando il valore assoluto e il secondo utilizzando una funzione quadratica.
+
+Altri indici che non dipendono dalla scala dei dati sono:
+
+- **Mean Absolute Percentage Error**: $$MAPE= mean(|p_t|)$$ con $p_t= \frac{e_{T+h}}{y_{T+h}}*100$
+
+Utilizzato soprattutto per il confronto tra diverse serie ma che risulta indefinito per valori di $y_t=0$ e assume valori estremi per valori di y vicini a zero. 
+
+- **Mean Absolute Scaled Error**: $$MASE= mean(|e_{T+h}|/C)$$ 
+
+Si basa sugli **errori riscalati**, anch'esso per il confronto tra serie con scale diverse, alternativo agli errori percentuali del MAPE.
+
+```{r}
+train_set <- window(tData, start=2010,end=2015)
+
+ts_fit1 <- meanf(train_set,h=365)
+ts_fit2 <- rwf(train_set,h=365)
+ts_fit3 <- snaive(train_set,h=365)
+ts_fit4 <- rwf(train_set,h=365,drift = TRUE)
+
+# Previsioni per l'ultimo anno
+autoplot(train_set) + autolayer(ts_fit1,PI=FALSE,series="Mean") +
+  autolayer(ts_fit2,PI=FALSE,series="Naive")+autolayer(ts_fit3,PI=FALSE,series="Seasonal Naive")+autolayer(ts_fit4,PI=FALSE,series="Drift")+
+  guides(colour=guide_legend(title="Forecast")) + ggtitle("Previsioni annuali PM 2.5 ")+
+  theme_bw() + ylab("PM 2.5 levels")
+
+test_set <- window(tsdata1[,"PM25"], start= 2015, end=2015.996)
+ind <- c(2,3,5,6)
+
+Average <- accuracy(ts_fit1,test_set)[2,ind] # mean
+Naive <- accuracy(ts_fit2,test_set)[2,ind] # naive
+SeasNaive <- accuracy(ts_fit3,test_set)[2,ind] # seasonal naive
+Drift <- accuracy(ts_fit4,test_set)[2,ind] # drift
+tb <- rbind(Average,Naive,SeasNaive,Drift)
+tb
+```
+
+Dalle misure di accuratezza è possibile notare come il metodo **average** sia quello con RMSE **più basso**, considerando invece il MAE, che è un indice in valore assoluto, il metodo naive ha un valore più basso degli altri.
+
+### Time Series Cross-Validation
+Un metodo automatico per scegliere la miglior combinazione tra training e test set è la **cross-validation**. In questo metodo, il test set è costituito da una sola osservazione e il training set dalle altre osservazioni precedenti che sono utilizzate per la costruzione della previsione.
+L'osservazione del test set si sposta avanti nel tempo e viene calcolato l'indice di accuratezza scelto, nel nostro caso l'RMSE.
+
+```{r, attr.output='style="max-height: 100px;"'}
+e <- tsCV(tData,rwf,h=365,initial = 1825)
+rmse <- sqrt(colMeans(e^2, na.rm = T))
+rmse
+```
+
+E' possibile vedere che anche la *cross-validation** garantisce un errore di previsione più basso con un orizzonte temporale di 365 giorni.
+
+### Intervalli di previsione
+Calcoliamo gli intervalli di previsione per il metodo Naive in cui la deviazione standard è ottenuta come: $\hat{\sigma_h}=\hat{\sigma}\sqrt{h}$ è l'intervallo di previsione come: $\hat{y_{T+h|h}} \pm 1.96\hat{\sigma_h}$.
+Supponendo che gli intervalli abbiano distribuzione normale e che la previsione sia h-step, inoltre gli intervalli di previsione, se i dati sono stati trasformati, devono essere ri-trasformati sulla scala originale, ricordando come già detto nei paragrafi precedenti che gli intervalli non saranno più simmetrici.
+```{r, attr.output='style="max-height: 100px;"'}
+rwf(train_set,h=365,level = 95,lambda = "auto")
+```
+
+## Modello di regressione per serie storiche
+
+Utilizzando le variabile presenti nel nostro dataset è possibile costruire un **modello di regressione lineare multiplo** per valutare l'effetto dei predittori sulla variabile risposta. Formalmente: $$y_t = \beta_0 + \beta_1 x_{1,t}+ \beta_2 x_{2,t} + .. + \beta_j x_{j,t} + e_t$$  
+
+```{r}
+fit1 <- tslm(PM25 ~ dew_point + temperature + cum_windspeed + pressure + humidity + precipitation , data = tData1)
+summary(fit1)
+
+```
+
+I **coefficienti** delle variabili indipendenti $\beta_j$ mostrano l'effetto di un loro aumento unitario sulla variabile risposta, considerando fisse tutte le altre variabili. Gli **standard error** mostrano la variabilità dei coefficienti stimati e il **p-value** che ci permette di valutare la significatività del parametro più velocemente, molto importante per valutare l'effetto del predittore ma non molto utile per calcolare la previsione.
+
+Durante la formulazione di un modello di regressione si considerano rispettate le **assunzioni classiche** che riguardano:
+
+- modello correttamente specificato
+- $E[e_i]=0$
+- Errori non autocorrelati
+- Errori non correlate alle variabili predittive
+
+E come ipotesi aggiuntiva, utile per la formazione degli intervalli di previsione, è la normalità degli errori: $e_t \sim N(0,\sigma^2)$.
+
+Possiamo vedere visivamente i valori fittati ottenuti dal modello utilizzando il metodo dei minimi quadrati rispetto i valori originali dei nostri dati.
+
+```{r, out.width= "70%"}
+autoplot(tData1[,"PM25"],series="Dati oss.") + autolayer(fitted(fit1),series = "Fitted values")+
+  xlab("Year") + ylab("") +
+  ggtitle("Valori originali vs Valori fittati del modello") +
+  guides(colour=guide_legend(title="Valori")) + theme_bw()
+```
+
+A questo punto possiamo valutare il nostro modello analizzando i residui del modello e la bontà di adattamento. 
+Quest'ultima è osservabile attraverso l'indice $R^2$ presente nel summary precedente, definito come la quota di variabilità spiegata dal nostro modello rispetto la variabilità totale dei dati.  
+
+L'analisi dei residui ci permette di valutare il nostro modello; la loro media è abbastanza costante intorno allo zero, la distribuzione è simile ad una normale ma sembra esserci una piccola asimmetria positiva nei dati ed infine i residui sono seriamente autocorrelati, la conferma formale è possibile averla attraverso il **test di Breusch-Godfrey**, che è simile a quello di Ljung-Box ma costruito **ad hoc** per i modelli di regressione.
+
+```{r, out.width= "70%"}
+checkresiduals(fit1)
+```
+
+### Possibili outliers nel modello
+
+Una volta stimato il modello è possibile che siano presenti dei _possibili_ outlier che influenzano il modello in modo maggiore rispetto le altre osservazioni.
+Possiamo vederli più da vicino valutando i residui studentizzati, gli hat values e la distanza di Cook.
+I valori di riferimento per la presenza di outlier sono: 
+
+- Studentized Residuals $>|2|$
+- Hat Values $> 2*k/n$
+- Cook Distance $> 4/(n-k)$
+
+```{r, out.width= "70%"}
+# hat values:
+2*6/2191
+# cook distance:
+4/(2191-6)
+
+influencePlot(fit1, main="Influence Points")
+```
+
+### Serie di Fourier
+
+Durante la stima di un modello spesso è utile inserire delle **variabili dummy** per poter cogliere gli effetti **stagionali**, in caso di periodi più lunghi inserire molte dummy è sconveniente ed è più utile inserire i **termini della serie di Fourier**, composti da una serie di coppie di seno e coseno che permettono di approssimare una funzione periodica.  
+Essa può essere particolarmente utile nel nostro caso dove il periodo è composto da 365 giorni.
+$$s_k (t) = sin(\frac{2 \pi k t}{m})\space \space c_k (t) = cos(\frac{2 \pi k t}{m})$$
+
+```{r}
+fit2 <- tslm(PM25 ~ fourier(PM25,K=6) + dew_point + cum_windspeed + temperature + pressure + humidity + precipitation , data = tData1)
+summary(fit2)
+```
+
+Possiamo confrontare i due modelli, con e senza termini di Fourier, utilizzando diversi misure come: il **criterio di informazione di Akaike** (normale e corretto) o il **criterio di informazione Bayesiano**, la **Cross-Validation** oppure l'indice $R^2$ **corretto**. Il miglior modello è quello che minimizza i primi tre, e massimizza l'ultimo. 
+
+```{r}
+round(CV(fit1),2)
+round(CV(fit2),2)
+```
+
+### Previsioni con la regressione
+
+Allo stesso modo degli altri tipi di modelli anche con il modello di regressione lineare è possibile fare previsioni, che possono dividersi in:
+
+- **previsioni ex-ante**, realizzate utilizzando possibili valori futuri dei predittori.
+- **previsioni ex-post**, in cui i valori dei predittori si conoscono in anticipo e si valuta il modello di previsione utilizzato.  
+Per le nostre previsioni abbiamo stimato le previsioni per l'ultimo anno di emissioni di particolato sul modello normale.
+
+```{r, out.width= "70%"}
+# Previsioni con regressione
+train_set2 <- window(tData1, start=2010,end=2015)
+test_set2 <- window(tData1, start= 2015, end=2015.995)
+fit1_p <- tslm(PM25 ~ dew_point + cum_windspeed + temperature + pressure + humidity + precipitation , data = train_set2)
+
+test_set2 <- as.data.frame(test_set2)
+fc1 <- forecast(fit1_p,test_set2)
+
+autoplot(tData1[,"PM25"])+ autolayer(fc1) +ylab("PM 2.5")+ggtitle("Previsioni con regressione") + theme_bw()
+
+```
+
+## Decomposizione della serie storica
+
+Considerate le **componenti principali** di una serie storica quali: trend, stagionalità e irregolarità, è possibile applicare la decomposizione delle sue componenti che può essere di tipo additivo o moltiplicativo. Il primo è utilizzato quando l'entità delle fluttuazione stagionali non cambia con il livello della serie, il secondo quando le fluttuazioni sono proporzionali al livello della serie.  
+E' possibile, tuttavia, ricondursi ad una decomposizione additiva tramite trasformazione di Box-Cox.
+
+**Decomposizione additiva**: $y_t = S_t + T_t + R_t$
+
+**Step**:
+
+1. Stima della componente di trend-ciclica utilizzando la **media mobile**, definita come la media in un intervallo predefinito per ogni livello della serie, ciò permette di eliminare parte della casualità dei dati.
+2. Calcolo della serie de-trendizzata: $y_t - \hat{T_t}$
+3. Stima della componente stagionale, attraverso la media dei valori detrendizzati per quella stagione.
+4. Calcolo della componente residua: $\hat{R_t}= y_t - \hat{S_t} - \hat{T_t}$
+
+Utilizzando la funzione **decompose** è possibile ottenere tutte le **componenti stimate** utilizzando la decomposizione classica.
+
+```{r, out.width= "70%"}
+# Decomposizione classica
+additive <- decompose(tData1[,"PM25"],type = "additive")
+autoplot(additive)+ ggtitle("Decomposition of additive time series (transformed)")
+
+#
+autoplot(tData1[,"PM25"], series="Data") +
+  autolayer(seasadj(additive), series="Seasonally Adjusted", size=0.5) + # yt - St
+  autolayer(trendcycle(additive), series="Trend-cycle", size=1) + # Tt  
+  theme(legend.position="bottom") + ylab("PM 2.5") + theme_bw() + ggtitle("Time series components")
+```
+
+
+Altri tipi di decomposizione sono quella **X11** e **SEATS** (Seasonal Extraction in ARIMA Time Series) che permettono alla stagionalità di cambiare nel tempo diversamente da quella classica, e avere una componente trend/ciclica meno "smussata" per picchi e ribassi, inoltre perfomano meglio in caso di shock temporali, tuttavia non è applicabile per dati giornalieri come nel nostro caso.
+
+Un altro tipo di decomposizione più sofisticata che permette di trattare anche dati giornalieri è quella **STL** (Seasonal and Trend decomposition using Loess).
+
+Inoltre, con la funzione stl la componente stagionale non è considerata costante per ogni periodo e permette di catturare l'effetto variabile. Questo tipo di decomposizione tuttavia, consente solo quella additiva (risolvibile con la trasformazione di Box-Cox).
+
+```{r, out.width= "70%"}
+stl.fit <- stl(tData1[,"PM25"],s.window="periodic", robust=TRUE)
+
+autoplot(stl.fit) +
+  ggtitle("STL decomposition of PM 2.5 in Beijing") + theme_bw()
+```
+
+### Previsioni con decomposizione STL
+
+Utilizzando la decomposizione è possibile fare previsioni prevedendo separatamente la componente stagionale e quella de-stagionalizzata e applicando i metodi conosciuti naive e drift. 
+Calcolando l'accuratezza possiamo valutare le stime ottenute rispetto il training set.
+```{r, out.width= "60%"}
+# Previsioni 
+fc1 <- stlf(train_set2[,"PM25"], s.window="periodic", robust=TRUE, method="naive",h=365)
+fc2 <- stlf(train_set2[,"PM25"], s.window="periodic", robust=TRUE, method="rwdrift",h=365)
+
+acr_nv <- accuracy(fc1,test_set2[,"PM25"])[2,ind]
+acr_df <- accuracy(fc2,test_set2[,"PM25"])[2,ind]
+rbind(acr_nv,acr_df)
+
+autoplot(train_set2[,"PM25"], series="Data") + autolayer(fc1,PI=FALSE,series = "Naive fc")+
+  ylab("Values") + ggtitle("Previsioni con decomposizione STL")+ autolayer(fc2,PI=FALSE,series = "Drift fc")+
+  theme_bw()
+
+
+```
+
+## Modello ARIMA con stagionalità
+
+Uno delle famiglie di modelli più ampiamente utilizzate per la previsione di serie storiche è quella **ARIMA** (Auto Regressive Integrated Moving Average), in particolare sono **auto regressivi** perchè si basano sui valori passati della variabile considerata, mentre la **media mobile** utilizza gli errori previsti passati, ed infine il modello Arima unisce questi due aspetti "integrandoli" tra loro, in particolare utilizzando la differenziazione per rendere la serie storica stazionaria.
+$$ARIMA(p,d,q)$$
+Il valore **p** indica la parte auto-regressiva, **d**, il livello di differenziazione e **q**, il livello della media mobile.
+
+Per il nostro dataset potrebbe essere interessante applicare un particolare modello Arima chiamato **Seasonal ARIMA** che estende il modello originale considerando i **valori stagionali passati**: $SARIMA = (P,D,Q)_m$, tuttavia dato il periodo di 365 giorni la funzione non è in grado di gestire un intervallo di tempo cosi lungo.
+\
+Seguendo i consigli di Rob Hyndman ho modellato la stagionalità con una **serie di Fourier** e in seguito ho applicato il modello ARIMA e visualizzato le previsioni in-sample.
+
+```{r}
+fit_ar1 <- auto.arima(tData1[,"PM25"], xreg=fourier(tData1[,"PM25"],4),seasonal = FALSE)
+
+newreg <- fourier(tData1[,"PM25"],4,h=365)
+fc_ar1 <- forecast(fit_ar1,xreg=newreg)
+plot(fc_ar1,PI=FALSE)
+```
+
+
+## Conclusione
+
+L'obiettivo di questo progetto non è stato quello di trovare il modello con le migliori performance previsive ma mostrare e utilizzare buona parte degli strumenti utili per l'analisi di serie storiche. 
+In modo speciale, la qualità dei dati reali ha un impatto particolare per produrre una buona indagine che rispecchia a pieno il **fenomeno reale** che si vuole analizzare. 
+\
+\
+Soprattutto per i nostri dati si è visto che probabilmente un modello efficace richiede una complessità maggiore per far fronte alla **multi-stagionalità** che in caso di dati giornalieri molto lunghi può richiedere sia quella settimanale che quella giornaliera.
+
+
+
