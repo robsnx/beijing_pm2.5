@@ -3,7 +3,7 @@
 ## Introduzione
 Questo breve report si riferisce all’analisi del dataset sulle performance degli aerei di linea negli Stati Uniti
 d’America, in particolare vuole mostrare, con diversi tipi di visualizzazione, le informazioni contenute nei
-dati, utilizzando strumenti per processare e computare problemi su una grande mole di dati, come **PySpark**, e
+dati, utilizzando strumenti per processare e computare problemi su una grande mole di dati, come **Sparklyr**, e
 visualizzare i risultati con strumenti grafici nell’ambiente R.
 
 ## Dati
